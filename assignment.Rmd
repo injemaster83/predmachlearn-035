@@ -1,0 +1,135 @@
+---
+title: "Practical Machine Learning - Course Project"
+author: "Miguel Duarte"
+date: "Tuesday, December 22, 2015"
+output: html_document
+---
+
+# Machine Learning algorithm to predict activity quality
+
+## Description
+
+In this project, the main objective is to predict how a group of enthusiasts perform their exercises. Particularly, there are five ways to perform barbell lifts correctly and incorrectly, and we are interested in predicting them for 20 subjects, using a machine learning algorithm.
+
+## Chosen algorithm
+
+Because of its high predictive power, the algorithm we will use to accomplish this goal is **random forest**, with 4-fold cross-validation in order to prevent overfitting.
+
+## Model building
+
+In order to build the predictive model with random forest, the steps followed are:
+
+### Load R libraries
+
+The **caret** and **randomForest** packages were used for this project.
+
+### Load training and testing files
+
+The files were loaded using the fread function from the **data.table** package.
+
+### Convert variables to factor
+
+Before training the model with random forest, it is necessary to transform non-numeric variables to factors. So, the following variables were converted to factors:
+
+1. user_name
+2. cvtd_timestamp
+3. new_window
+
+It is very important to note that these transformations must be done both in the **training** and **testing** sets.
+
+Additionally, the dependant variable (Classe) in the training set **was also converted to factor**.
+
+### Check variable types concordance between training and testing set
+
+In order to make predictions using the trained model, it is required that the variables in the testing set have the same **type** as their correspondant variable in the training set. For example, the variable 'magnet_forearm_y' was read as integer in the testing set but in the training set was read as numeric.  
+The following variables in the testing set changed their type in order to match the training set:
+
+1. magnet_forearm_y (integer to numeric)
+2. magnet_forearm_z (integer to numeric)
+3. magnet_dumbbell_z (integer to numeric)
+
+```{r, echo=FALSE, results='hide'}
+library(data.table)
+library(randomForest)
+library(caret)
+
+train <- fread("./pml-training.csv",sep=",",header=T)
+test <- fread("./pml-testing.csv",sep=",",header=T)
+
+train$classe <- as.factor(train$classe)
+train$user_name <- as.factor(train$user_name)
+train$cvtd_timestamp <- as.factor(train$cvtd_timestamp)
+train$new_window <- as.factor(train$new_window)
+
+levels(test$user_name) <- levels(train$user_name)
+levels(test$cvtd_timestamp) <- levels(train$cvtd_timestamp)
+levels(test$new_window) <- levels(train$new_window)
+
+test$user_name <- as.factor(test$user_name)
+test$cvtd_timestamp <- as.factor(test$cvtd_timestamp)
+test$new_window <- as.factor(test$new_window)
+
+test$magnet_forearm_y <- as.numeric(test$magnet_forearm_y)
+test$magnet_forearm_y <- as.numeric(test$magnet_forearm_y)
+test$magnet_dumbbell_z <- as.numeric(test$magnet_dumbbell_z)
+```
+
+### Check for NA and blanks in the training set
+
+Once we check all the variables have the right type, the next step is to check NAs for numeric variables, and blanks for non-numeric variables. These values are considered "missings". 
+In the following table we notice that **several variables have the same number of missings (19,216 out of 19,622 rows)**. In other words, all these variables are near-constant and they have little value for prediction. For this reason, they were discarded.
+
+```{r, echo=FALSE, results='hold'}
+variable_na <- as.data.frame(sapply(train,function(x) { if (is.numeric(x)) return (length(which(is.na(x)))) else return (length(which(x==""))) } ))
+names(variable_na) <- c("missings")
+
+variable_na <- cbind(variables=rownames(variable_na),variable_na)
+rownames(variable_na) <- NULL
+
+variable_na
+```
+
+The variable "V1" was discarded as well, because it represents just a correlative number.  
+So, the following 58 variables were used as predictors for the machine learning algorithm.
+
+```{r, echo=FALSE, results='hold'}
+variable_list <- as.character(variable_na$variables[variable_na$missings==0 & !(variable_na$variables %in% c("V1","classe"))])
+
+variable_list
+```
+
+### Fit model
+
+After choosing the 58 regressors, the predictive model was finally fit using the **train** function from **caret** package. The parameters used are:
+
+* tuneLength=5
+* trControl= cross-validation (4-fold)
+* ntree=30
+* metric="Accuracy"
+
+Also, the random seed used to fit the model is **1103**. 
+
+```{r, echo=FALSE, results='hold'}
+set.seed(1103)
+fit <<- train(as.formula(paste("classe", paste(variable_list, sep = "", collapse = " + "), sep = " ~ ")), data=train[,c("classe",variable_list),with=F], method="rf", tuneLength=5, trControl = trainControl(method = "cv", number=4), allowParallel=TRUE, metric = "Accuracy", ntree=30, importance=TRUE, proximity=FALSE)
+```
+
+The results show that **the out of bag estimate of the error with 4-fold cross validation is 0.06%**, so the fitted model is very accurate.
+
+```{r, echo=FALSE, results='hold'}
+fit$finalModel
+```
+
+The predicted (columns) and the actual values (rows) match exactly, so the accuracy in the training set is **100%**.
+
+```{r, echo=FALSE, results='hold'}
+table(train$classe,predict(fit,newdata = train[,variable_list,with=F]))
+```
+
+
+### Out of sample error
+
+The accuracy of the model in the training set was 100%, so this suggests the out of sample error should be low (close to zero), **assuming the new 20 subjects in the test set perform their exercises in a similar way than the subjects in the training set**. In other words, with this assumption we expect **the prediction will match the actual value for the 20 subjects in the test set**.  
+
+Not surprisingly, when we evaluate the fitted model in the test set, we verify **the predictions for the 20 subjects were all correct**. 
+
